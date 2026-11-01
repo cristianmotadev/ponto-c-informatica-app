@@ -1,0 +1,37 @@
+*.iml
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/build
+/captures
+.externalNativeBuild
+.cxx
+# === Build ===
+.gradle/
+build/
+*.iml
+.idea/
+local.properties
+captures/
+
+# === Android Studio ===
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# === Keystore (NUNCA subir — perder isso = nunca mais atualizar o app) ===
+*.jks
+*.keystore
+keystore/
+
+# === Sistema ===
+.DS_Store
+Thumbs.db
+
+# === Site-cliente (dependências npm, se vier a ter) ===
+site-cliente/node_modules/

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acompanhe sua OS — Ponto C. Informática</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #141210; color: #ede8e4; padding: 16px; line-height: 1.6;
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        h1 { color: #e8a184; margin-bottom: 24px; font-size: 1.5rem; }
+        .card {
+            background: #1e1b18; padding: 20px; border-radius: 12px;
+            margin-bottom: 16px; border: 1px solid #2a2520;
+        }
+        .label { color: #b25e3a; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .value { font-size: 1.1rem; margin-bottom: 12px; }
+        .status-badge {
+            display: inline-block; padding: 6px 12px; border-radius: 20px;
+            background: #b25e3a; color: white; font-weight: 600;
+        }
+        .status-badge.pronto { background: #4caf50; }
+        .historico-item {
+            padding: 12px; background: #2a2520; border-radius: 8px;
+            margin-bottom: 8px; border-left: 3px solid #b25e3a;
+        }
+        .historico-data { font-size: 0.8rem; color: #888; }
+        .fotos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px; margin-top: 12px;
+        }
+        .fotos-grid img {
+            width: 100%; border-radius: 8px; display: block;
+            border: 1px solid #2a2520;
+        }
+        button {
+            width: 100%; padding: 14px; background: #b25e3a; color: white;
+            border: none; border-radius: 8px; font-size: 1rem; font-weight: 600;
+            cursor: pointer; margin-top: 16px;
+        }
+        button:hover { background: #c86e4a; }
+        button.secundario { background: transparent; border: 2px solid #b25e3a; color: #b25e3a; }
+        .erro { color: #ff6b6b; text-align: center; padding: 40px; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+        .aprovado {
+            background: #2e7d32; padding: 16px; border-radius: 8px;
+            text-align: center; margin-top: 16px;
+        }
+        .recusado { background: #c62828; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Ponto C. Informática</h1>
+        <div id="conteudo" class="loading">Carregando sua OS...</div>
+    </div>
+
+    <!-- Firebase JS SDK v9 modular via CDN (sem build, sem node_modules) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, collection, query, where, getDocs, updateDoc, doc }
+            from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        // ===== ESTE BLOCO SERÁ SUBSTITUÍDO automaticamente pelo seu config real (passo 3) =====
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoEhX_xRpUnYalby0ZpvjXg7oy5w7sVas",
+            authDomain: "pontocinformatica.firebaseapp.com",
+            projectId: "pontocinformatica",
+            storageBucket: "pontocinformatica.firebasestorage.app",
+            messagingSenderId: "782375710742",
+            appId: "1:782375710742:web:6cbf8ad75196c4f2460537"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Extrai o token da URL: /os/<token>
+        const token = window.location.pathname.split("/").pop();
+
+        // Escapa caracteres especiais antes de inserir texto no HTML (anti-XSS)
+        function escaparTexto(texto) {
+            if (texto === null || texto === undefined) return "";
+            return String(texto)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        async function carregarOS() {
+            const conteudo = document.getElementById("conteudo");
+
+            if (!token || token === "os") {
+                conteudo.innerHTML = '<div class="erro">❌ Link inválido.</div>';
+                return;
+            }
+
+            try {
+                // Query de campo único (tokenPublico): não exige índice composto
+                const q = query(
+                    collection(db, "ordensServico"),
+                    where("tokenPublico", "==", token)
+                );
+                const snapshot = await getDocs(q);
+
+                if (snapshot.empty) {
+                    conteudo.innerHTML = '<div class="erro">❌ OS não encontrada.<br>O link pode ter expirado.</div>';
+                    return;
+                }
+
+                const os = snapshot.docs[0].data();
+                const osId = snapshot.docs[0].id;
+                renderizarOS(os, osId);
+            } catch (e) {
+                console.error(e);
+                conteudo.innerHTML = '<div class="erro">❌ Erro ao carregar: ' + escaparTexto(e.message) + '</div>';
+            }
+        }
+
+        function formatarData(millis) {
+            if (!millis) return "—";
+            return new Date(millis).toLocaleString("pt-BR");
+        }
+
+        function diasRestantes(previsao) {
+            if (!previsao) return "";
+            const dias = Math.ceil((previsao - Date.now()) / 86400000);
+            if (dias > 1) return `Faltam ${dias} dias`;
+            if (dias === 1) return "Falta 1 dia";
+            return "Prazo vencido";
+        }
+
+        function renderizarOS(os, osId) {
+            const statusClass = os.status === "PRONTO" ? "pronto" : "";
+            const restante = diasRestantes(os.previsaoEntrega);
+
+            // Card de diagnóstico técnico (só aparece se preenchido)
+            const diagnosticoHtml = os.diagnostico ? `
+                <div class="card">
+                    <div class="label">Diagnóstico técnico</div>
+                    <div class="value">${escaparTexto(os.diagnostico)}</div>
+                </div>` : "";
+
+            // Galeria de fotos do aparelho (loading="lazy" economiza dados do cliente)
+            const fotosHtml = (os.fotos && os.fotos.length > 0) ? `
+                <div class="card">
+                    <div class="label">Fotos do aparelho</div>
+                    <div class="fotos-grid">
+                        ${os.fotos.map(f => `<img src="${escaparTexto(f.url)}" alt="Foto do aparelho" loading="lazy">`).join("")}
+                    </div>
+                </div>` : "";
+
+            let orcamentoHtml = "";
+            if (os.orcamentoAprovado === true) {
+                orcamentoHtml = '<div class="aprovado">✅ Orçamento aprovado em ' +
+                    formatarData(os.orcamentoDecididoEm) + '</div>';
+            } else if (os.orcamentoAprovado === false) {
+                orcamentoHtml = '<div class="aprovado recusado">❌ Orçamento recusado em ' +
+                    formatarData(os.orcamentoDecididoEm) + '</div>';
+            } else if (os.valorOrcado > 0) {
+                orcamentoHtml = `
+                    <div class="card">
+                        <div class="label">Orçamento</div>
+                        <div class="value">R$ ${Number(os.valorOrcado).toFixed(2)}</div>
+                        <button onclick="aprovarOrcamento('${osId}')">✅ Aprovar orçamento</button>
+                        <button class="secundario" onclick="recusarOrcamento('${osId}')">❌ Recusar</button>
+                    </div>`;
+            }
+
+            const historicoHtml = (os.historico || [])
+                .slice()
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .map(h => `
+                    <div class="historico-item">
+                        <div>${escaparTexto(h.mensagem)}</div>
+                        <div class="historico-data">${formatarData(h.timestamp)}</div>
+                    </div>
+                `).join("") || "<p style='color:#888'>Nenhuma atualização ainda.</p>";
+
+            document.getElementById("conteudo").innerHTML = `
+                <div class="card">
+                    <div class="label">Cliente</div>
+                    <div class="value">${escaparTexto(os.clienteNome)}</div>
+                    <div class="label">Aparelho</div>
+                    <div class="value">${escaparTexto(os.aparelhoMarca)} ${escaparTexto(os.aparelhoModelo)}</div>
+                    <div class="label">Defeito relatado</div>
+                    <div class="value">${escaparTexto(os.defeitoRelatado)}</div>
+                </div>
+                ${diagnosticoHtml}
+                <div class="card">
+                    <div class="label">Status atual</div>
+                    <div class="value">
+                        <span class="status-badge ${statusClass}">${escaparTexto(os.status)}</span>
+                        ${restante ? " · " + restante : ""}
+                    </div>
+                    <div class="label">Entrada</div>
+                    <div class="value">${formatarData(os.dataEntrada)}</div>
+                    <div class="label">Previsão de entrega</div>
+                    <div class="value">${formatarData(os.previsaoEntrega)}</div>
+                </div>
+                ${orcamentoHtml}
+                ${fotosHtml}
+                <div class="card">
+                    <div class="label">Histórico de atualizações</div>
+                    <div style="margin-top:12px">${historicoHtml}</div>
+                </div>
+            `;
+        }
+
+        // Funções globais chamadas pelos botões de orçamento
+        window.aprovarOrcamento = async function(osId) {
+            if (!confirm("Confirma a aprovação do orçamento?")) return;
+            await updateDoc(doc(db, "ordensServico", osId), {
+                orcamentoAprovado: true,
+                orcamentoDecididoEm: Date.now()
+            });
+            carregarOS();
+        };
+
+        window.recusarOrcamento = async function(osId) {
+            if (!confirm("Confirma a recusa do orçamento?")) return;
+            await updateDoc(doc(db, "ordensServico", osId), {
+                orcamentoAprovado: false,
+                orcamentoDecididoEm: Date.now()
+            });
+            carregarOS();
+        };
+
+        carregarOS();
+    </script>
+</body>
+</html>

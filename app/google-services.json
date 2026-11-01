@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "782375710742",
+    "firebase_url": "https://pontocinformatica-default-rtdb.firebaseio.com",
+    "project_id": "pontocinformatica",
+    "storage_bucket": "pontocinformatica.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:782375710742:android:387a14c3ba4dd6e0460537",
+        "android_client_info": {
+          "package_name": "com.ddcrcodelab.pontocinformatica"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBptpiMUuCbSN0HoZeUPDUMS3pOXiyG8M0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
