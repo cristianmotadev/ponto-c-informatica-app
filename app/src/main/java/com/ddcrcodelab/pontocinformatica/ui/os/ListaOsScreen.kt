@@ -14,15 +14,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -35,18 +42,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ddcrcodelab.pontocinformatica.data.ThemePreferences
 import com.ddcrcodelab.pontocinformatica.data.model.OrdemServico
 import com.ddcrcodelab.pontocinformatica.ui.theme.ThemeMode
+import com.ddcrcodelab.pontocinformatica.util.SessaoManager
 import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.ceil
-
-import androidx.compose.material3.IconButton
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material3.TopAppBar
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.ExperimentalMaterial3Api
 
 // SimpleDateFormat: java.time exigiria desugaring no minSdk 24
 private val formatoData = SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR"))
@@ -65,42 +68,102 @@ fun diasRestantes(previsao: Long): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListaOsScreen(
     aoCriarOs: () -> Unit,
     aoAbrirDetalhe: (String) -> Unit,
     aoAbrirEquipe: () -> Unit,
+    aoAbrirPerfil: () -> Unit,
     aoSair: () -> Unit,
-    viewModel: ListaOsViewModel = koinViewModel()
+    viewModel: ListaOsViewModel = koinViewModel(),
+    sessao: SessaoManager = koinInject()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Tema: Context lido no escopo composable; remember cacheia a instância
+    // FASE 12: identidade para o cabeçalho da gaveta
+    val usuario by sessao.usuario.collectAsStateWithLifecycle()
+    val perfil by sessao.perfil.collectAsStateWithLifecycle()
+    val ehDono by sessao.ehDono.collectAsStateWithLifecycle()
+
+    val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
+    val escopoDrawer = rememberCoroutineScope()
+
+    // Tema
     val context = LocalContext.current
     val themePrefs = remember(context) { ThemePreferences(context) }
     val themeMode by themePrefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
     val escopo = rememberCoroutineScope()
 
-    Scaffold(
-        topBar = {
-            // TopAppBar já reserva o espaço da barra de status (edge-to-edge):
-            // o Row customizado anterior desenhava o título sob o relógio/notificações
-            TopAppBar(
-                title = {
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Spacer(Modifier.height(16.dp))
+
+                // Cabeçalho: nome completo + perfil de permissão
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Ordens de Serviço",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = usuario?.nome.orEmpty(),
+                        style = MaterialTheme.typography.titleLarge
                     )
-                },
-                actions = {
-                    // Fase 11: gestão de equipe aparece só para o dono
-                    if (state.ehDono) {
-                        TextButton(onClick = aoAbrirEquipe) { Text("👥 Equipe") }
+                    Text(
+                        text = if (ehDono) "Perfil: Dono" else "Perfil: ${perfil?.nome ?: "—"}",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                HorizontalDivider()
+
+                NavigationDrawerItem(
+                    label = { Text("Meu perfil") },
+                    selected = false,
+                    onClick = {
+                        escopoDrawer.launch { drawerState.close() }
+                        aoAbrirPerfil()
+                    }
+                )
+
+                // Pedidos de peça e Notificações entram na Fase 13 aqui
+
+                if (ehDono) {
+                    NavigationDrawerItem(
+                        label = { Text("Equipe") },
+                        selected = false,
+                        onClick = {
+                            escopoDrawer.launch { drawerState.close() }
+                            aoAbrirEquipe()
+                        }
+                    )
+                }
+
+                NavigationDrawerItem(
+                    label = { Text("Sair") },
+                    selected = false,
+                    onClick = aoSair
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // FASE 12: hamburger abre a gaveta
+                    IconButton(onClick = { escopoDrawer.launch { drawerState.open() } }) {
+                        Icon(Icons.Default.Menu, contentDescription = "Abrir menu")
                     }
 
-                    // Ciclo de tema com rótulo curto para caber em telas estreitas
+                    Text(
+                        "Ordens de Serviço",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+
                     TextButton(onClick = {
                         val proximo = when (themeMode) {
                             ThemeMode.SYSTEM -> ThemeMode.LIGHT
@@ -111,83 +174,73 @@ fun ListaOsScreen(
                     }) {
                         Text(
                             when (themeMode) {
-                                ThemeMode.SYSTEM -> "🌓 Sistema"
-                                ThemeMode.LIGHT -> "☀️ Claro"
-                                ThemeMode.DARK -> "🌙 Escuro"
+                                ThemeMode.SYSTEM -> "Tema: sistema"
+                                ThemeMode.LIGHT -> "Tema: diurno"
+                                ThemeMode.DARK -> "Tema: noturno"
                             }
                         )
                     }
-
-                    // Fase 10: sair da conta
-                    IconButton(onClick = aoSair) {
-                        Icon(
-                            imageVector = Icons.Default.ExitToApp,
-                            contentDescription = "Sair da conta"
-                        )
+                }
+            },
+            floatingActionButton = {
+                if (!state.bloqueado) {
+                    FloatingActionButton(onClick = aoCriarOs) {
+                        Icon(Icons.Default.Add, contentDescription = "Criar nova OS")
                     }
                 }
-            )
-        },
-        floatingActionButton = {
-            // Sem FAB para conta bloqueada
-            if (!state.bloqueado) {
-                FloatingActionButton(onClick = aoCriarOs) {
-                    Icon(Icons.Default.Add, contentDescription = "Criar nova OS")
-                }
             }
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            when {
-                // FASE 9: conta desativada → tela de bloqueio com saída
-                state.bloqueado -> Column(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Conta desativada.", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Fale com o responsável pela loja para reativar seu acesso.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Button(onClick = aoSair) { Text("Sair") }
-                }
-
-                state.carregando -> CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center)
-                )
-
-                state.erro != null -> Text(
-                    text = state.erro!!,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp)
-                )
-
-                state.ordens.isEmpty() -> Text(
-                    text = "Nenhuma OS ainda.\nToque em + para criar a primeira.",
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp)
-                )
-
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(state.ordens, key = { it.id }) { ordem ->
-                        CardOs(
-                            ordem = ordem,
-                            aoClicar = { aoAbrirDetalhe(ordem.id) }
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                when {
+                    state.bloqueado -> Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("Conta desativada.", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Fale com o responsável pela loja para reativar seu acesso.",
+                            style = MaterialTheme.typography.bodyMedium
                         )
+                        Button(onClick = aoSair) { Text("Sair") }
+                    }
+
+                    state.carregando -> CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+
+                    state.erro != null -> Text(
+                        text = state.erro!!,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                    )
+
+                    state.ordens.isEmpty() -> Text(
+                        text = "Nenhuma OS ainda.\nToque em + para criar a primeira.",
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                    )
+
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(state.ordens, key = { it.id }) { ordem ->
+                            CardOs(
+                                ordem = ordem,
+                                aoClicar = { aoAbrirDetalhe(ordem.id) }
+                            )
+                        }
                     }
                 }
             }

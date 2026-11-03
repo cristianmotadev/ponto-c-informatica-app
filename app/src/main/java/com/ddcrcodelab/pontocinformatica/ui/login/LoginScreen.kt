@@ -24,13 +24,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.ddcrcodelab.pontocinformatica.R
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -42,35 +39,38 @@ fun LoginScreen(
 
     var identificador by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
-    var mostrarRecuperacao by remember { mutableStateOf(false) }
+    var mostrandoReset by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.logado) {
-        if (state.logado) aoEntrar()
+    // Navega uma única vez quando o login confirma
+    LaunchedEffect(state.sucesso) {
+        if (state.sucesso) {
+            viewModel.consumirSucesso()
+            aoEntrar()
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
+        Text("Ponto C. Informática", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = stringResource(R.string.app_name),
-            style = MaterialTheme.typography.headlineMedium
+            "Gestão de ordens de serviço",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(bottom = 24.dp)
         )
-        Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
             value = identificador,
             onValueChange = { identificador = it },
             label = { Text("Usuário ou e-mail") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(Modifier.height(12.dp))
-
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = senha,
             onValueChange = { senha = it },
@@ -82,36 +82,39 @@ fun LoginScreen(
         )
 
         state.erro?.let {
-            Spacer(Modifier.height(12.dp))
-            Text(it, color = MaterialTheme.colorScheme.error)
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
 
-        Spacer(Modifier.height(24.dp))
-
+        Spacer(Modifier.height(16.dp))
         Button(
             onClick = { viewModel.entrar(identificador, senha) },
             enabled = !state.carregando,
             modifier = Modifier.fillMaxWidth()
         ) {
             if (state.carregando) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
                 Text("Entrar")
             }
         }
 
-        TextButton(onClick = { mostrarRecuperacao = true }) {
+        TextButton(onClick = { mostrandoReset = true }) {
             Text("Esqueci minha senha")
         }
     }
 
-    if (mostrarRecuperacao) {
-        DialogRecuperacao(
-            recuperando = state.recuperando,
-            mensagem = state.mensagemRecuperacao,
+    if (mostrandoReset) {
+        DialogRecuperarSenha(
+            enviando = state.enviandoReset,
+            erro = state.erroReset,
+            enviado = state.resetEnviado,
             onDismiss = {
-                mostrarRecuperacao = false
-                viewModel.limparMensagemRecuperacao()
+                mostrandoReset = false
+                viewModel.consumirReset()
             },
             onConfirm = { viewModel.recuperarSenha(it) }
         )
@@ -119,20 +122,24 @@ fun LoginScreen(
 }
 
 @Composable
-private fun DialogRecuperacao(
-    recuperando: Boolean,
-    mensagem: String?,
+private fun DialogRecuperarSenha(
+    enviando: Boolean,
+    erro: String?,
+    enviado: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
     var identificador by remember { mutableStateOf("") }
 
     AlertDialog(
-        onDismissRequest = { if (!recuperando) onDismiss() },
+        onDismissRequest = { if (!enviando) onDismiss() },
         title = { Text("Recuperar senha") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Informe seu usuário ou e-mail cadastrado.")
+                Text(
+                    "Informe seu usuário ou e-mail. Enviaremos o link de redefinição para o e-mail cadastrado.",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 OutlinedTextField(
                     value = identificador,
                     onValueChange = { identificador = it },
@@ -140,17 +147,18 @@ private fun DialogRecuperacao(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                mensagem?.let {
-                    Text(it, color = MaterialTheme.colorScheme.primary)
+                erro?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (enviado) {
+                    Text("E-mail de recuperação enviado. Confira a caixa de entrada.")
                 }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = { onConfirm(identificador) },
-                enabled = !recuperando && mensagem == null
+                enabled = !enviando && !enviado
             ) {
-                if (recuperando) {
+                if (enviando) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
                     Text("Enviar link")
@@ -158,7 +166,7 @@ private fun DialogRecuperacao(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !recuperando) { Text("Fechar") }
+            TextButton(onClick = onDismiss, enabled = !enviando) { Text("Fechar") }
         }
     )
 }

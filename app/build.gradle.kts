@@ -72,21 +72,21 @@ dependencies {
     // Koin: injeção de dependência SEM processador de anotações (KSP).
     // Escolhido nesta fase por adicionar zero risco à matriz de versões do build;
     // a arquitetura em camadas permite migrar para Hilt depois sem reescrever telas.
-    implementation("io.insert-koin:koin-android:4.0.2")
-    implementation("io.insert-koin:koin-androidx-compose:4.0.2")
+    implementation("io.insert-koin:koin-android:4.2.2")
+    implementation("io.insert-koin:koin-androidx-compose:4.2.2")
 
     // DataStore Preferences: persistência de configurações (tema)
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.3.0")
 
     // Firebase Storage: fotos do aparelho (versão gerenciada pelo BOM)
     implementation("com.google.firebase:firebase-storage")
 
     // Coil: carregamento assíncrono de imagens com cache (leve e mantido ativamente)
-    implementation("io.coil-kt.coil3:coil-compose:3.1.0")
+    implementation("io.coil-kt.coil3:coil-compose:3.6.3")
 
     // Coil 3: fetcher de imagens via rede (OBRIGATÓRIO no Coil 3;
     // no Coil 2 vinha embutido no coil-compose)
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
 
     // Cloud Functions (callables: excluir usuário, redefinir senha) — versão pelo BOM
     implementation("com.google.firebase:firebase-functions")

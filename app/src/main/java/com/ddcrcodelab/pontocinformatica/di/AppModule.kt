@@ -10,23 +10,25 @@ import com.ddcrcodelab.pontocinformatica.ui.os.CriarOsViewModel
 import com.ddcrcodelab.pontocinformatica.ui.os.DetalheOsViewModel
 import com.ddcrcodelab.pontocinformatica.ui.os.ListaOsViewModel
 import com.ddcrcodelab.pontocinformatica.util.GeradorPdf
+import com.ddcrcodelab.pontocinformatica.util.SessaoManager
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.storage.FirebaseStorage
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
+import com.ddcrcodelab.pontocinformatica.ui.perfil.MeuPerfilViewModel
 
 val appModule = module {
     single { FirebaseFirestore.getInstance() }
     single { FirebaseStorage.getInstance() }
-    single { FirebaseFunctions.getInstance() }
     single<OsRepository> { FirestoreOsRepository(get(), get()) }
-    single<UsuarioRepository> { FirestoreUsuarioRepository(get(), get(), get()) }
+    single<UsuarioRepository> { FirestoreUsuarioRepository(get(), get()) }
     single { GeradorPdf(get()) }
+    single { SessaoManager(get()) }  // FASE 11: manager de sessão e permissões
 
     viewModel { LoginViewModel(get()) }
     viewModel { ListaOsViewModel(get(), get()) }
     viewModel { CriarOsViewModel(get()) }
     viewModel { DetalheOsViewModel(get(), get(), get()) }
     viewModel { FuncionariosViewModel(get()) }
+    viewModel { MeuPerfilViewModel(get(), get()) }
 }

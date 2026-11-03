@@ -4,9 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -16,9 +22,12 @@ import com.ddcrcodelab.pontocinformatica.ui.login.LoginScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.CriarOsScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.DetalheOsScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.ListaOsScreen
+import com.ddcrcodelab.pontocinformatica.ui.perfil.MeuPerfilScreen
 import com.ddcrcodelab.pontocinformatica.ui.theme.PontoCTheme
 import com.ddcrcodelab.pontocinformatica.ui.theme.ThemeMode
+import com.ddcrcodelab.pontocinformatica.util.SessaoManager
 import com.google.firebase.auth.FirebaseAuth
+import org.koin.compose.koinInject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,49 +38,76 @@ class MainActivity : ComponentActivity() {
             val themeMode by themePrefs.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
 
             PontoCTheme(themeMode = themeMode) {
-                val navController = rememberNavController()
+                val sessao: SessaoManager = koinInject()
+                val usuarioSessao by sessao.usuario.collectAsStateWithLifecycle()
 
-                // Se já existe sessão ativa, pula direto para a home
-                val inicio = if (FirebaseAuth.getInstance().currentUser != null) "home" else "login"
+                val logado = FirebaseAuth.getInstance().currentUser != null
 
-                NavHost(navController, startDestination = inicio) {
-                    composable("login") {
-                        LoginScreen(
-                            aoEntrar = {
-                                navController.navigate("home") {
-                                    popUpTo("login") { inclusive = true }
-                                }
+                when {
+                    // FASE 12: senha redefinida pelo dono → troca obrigatória.
+                    // Envolve TUDO: não há voltar, não há gaveta, não há lista.
+                    logado && usuarioSessao?.senhaTemporaria == true -> {
+                        MeuPerfilScreen(obrigatoria = true)
+                    }
+
+                    // Logado mas o perfil ainda não chegou do Firestore:
+                    // evita "flash" da tela errada antes do gate decidir
+                    logado && usuarioSessao == null -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    else -> {
+                        val navController = rememberNavController()
+                        val inicio = if (logado) "home" else "login"
+
+                        NavHost(navController, startDestination = inicio) {
+                            composable("login") {
+                                LoginScreen(
+                                    aoEntrar = {
+                                        navController.navigate("home") {
+                                            popUpTo("login") { inclusive = true }
+                                        }
+                                    }
+                                )
                             }
-                        )
-                    }
-                    composable("home") {
-                        ListaOsScreen(
-                            aoCriarOs = { navController.navigate("criar_os") },
-                            aoAbrirDetalhe = { osId -> navController.navigate("detalhe/$osId") },
-                            aoAbrirEquipe = { navController.navigate("funcionarios") },
-                            aoSair = {
-                                FirebaseAuth.getInstance().signOut()
-                                navController.navigate("login") {
-                                    popUpTo(0) // limpa toda a pilha
-                                }
+                            composable("home") {
+                                ListaOsScreen(
+                                    aoCriarOs = { navController.navigate("criar_os") },
+                                    aoAbrirDetalhe = { osId -> navController.navigate("detalhe/$osId") },
+                                    aoAbrirEquipe = { navController.navigate("funcionarios") },
+                                    aoAbrirPerfil = { navController.navigate("perfil") },
+                                    aoSair = {
+                                        FirebaseAuth.getInstance().signOut()
+                                        navController.navigate("login") {
+                                            popUpTo(0)
+                                        }
+                                    }
+                                )
                             }
-                        )
-                    }
-                    composable("criar_os") {
-                        CriarOsScreen(
-                            aoSalvar = { navController.popBackStack() }
-                        )
-                    }
-                    composable("detalhe/{osId}") { backStack ->
-                        DetalheOsScreen(
-                            osId = backStack.arguments?.getString("osId").orEmpty(),
-                            aoVoltar = { navController.popBackStack() }
-                        )
-                    }
-                    composable("funcionarios") {
-                        FuncionariosScreen(
-                            aoVoltar = { navController.popBackStack() }
-                        )
+                            composable("criar_os") {
+                                CriarOsScreen(
+                                    aoSalvar = { navController.popBackStack() }
+                                )
+                            }
+                            composable("detalhe/{osId}") { backStack ->
+                                DetalheOsScreen(
+                                    osId = backStack.arguments?.getString("osId").orEmpty(),
+                                    aoVoltar = { navController.popBackStack() }
+                                )
+                            }
+                            composable("funcionarios") {
+                                FuncionariosScreen(
+                                    aoVoltar = { navController.popBackStack() }
+                                )
+                            }
+                            composable("perfil") {
+                                MeuPerfilScreen(
+                                    aoVoltar = { navController.popBackStack() }
+                                )
+                            }
+                        }
                     }
                 }
             }

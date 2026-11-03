@@ -1,9 +1,11 @@
 package com.ddcrcodelab.pontocinformatica.data.repository
 
 import android.content.Context
-import com.ddcrcodelab.pontocinformatica.data.model.Papeis
 import com.ddcrcodelab.pontocinformatica.data.model.PerfilPermissao
+import com.ddcrcodelab.pontocinformatica.data.model.Permissoes
+import com.ddcrcodelab.pontocinformatica.data.model.Usernames
 import com.ddcrcodelab.pontocinformatica.data.model.Usuario
+import com.ddcrcodelab.pontocinformatica.data.model.UsuarioPorNome
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -14,162 +16,173 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlin.random.Random
 
 interface UsuarioRepository {
     fun observarUsuario(uid: String): Flow<Usuario?>
-    fun observarEquipe(): Flow<List<Usuario>>
+    fun observarPerfil(perfilId: String): Flow<PerfilPermissao?>
     fun observarPerfis(): Flow<List<PerfilPermissao>>
-    suspend fun buscarEmailPorUsername(username: String): String?
-    suspend fun enviarRecuperacao(identificador: String): String
-    suspend fun criarPerfisPadraoSeNecessario()
-    suspend fun criarPerfil(nome: String, permissoes: List<String>): String
-    suspend fun atualizarPerfil(id: String, nome: String, permissoes: List<String>)
-    suspend fun excluirPerfil(id: String)
+    fun observarEquipe(): Flow<List<Usuario>>
+
+    /** Login por username: username → índice → email para o signIn. */
+    suspend fun buscarPorUsername(username: String): UsuarioPorNome?
+
+    /** Recuperação de senha: Firebase envia e-mail para o e-mail real. */
+    suspend fun enviarResetSenha(email: String)
+
+    /** Cria conta no Auth (app secundário) + perfil + índice de username. */
     suspend fun criarContaFuncionario(
-        nome: String, username: String, email: String, senha: String, perfilId: String
+        nome: String,
+        username: String,
+        email: String,
+        senha: String,
+        perfilId: String
     ): String
+
+    /** Edita nome/username/perfil; mantém o índice usuariosPorNome coerente. */
     suspend fun atualizarUsuario(uid: String, nome: String, username: String, perfilId: String)
+
     suspend fun definirAtivo(uid: String, ativo: Boolean)
-    suspend fun redefinirSenha(uid: String): String
-    suspend fun excluirUsuario(uid: String)
+
+    /** FASE 12: o próprio usuário limpa o flag após a troca obrigatória. */
+    suspend fun limparFlagSenhaTemporaria(uid: String)
+
+    suspend fun salvarPerfil(perfil: PerfilPermissao): String
+    suspend fun excluirPerfil(perfilId: String)
+
+    /** Cria Balcão e Técnico se a coleção perfis estiver vazia (bootstrap). */
+    suspend fun garantirPresets()
+
+    /** Cloud Function: gera senha temporária (exibida uma única vez). */
+    suspend fun redefinirSenhaViaFunction(uid: String): String
+
+    /** Cloud Function: exclui Auth + índice + doc (só dono; nunca a si mesmo). */
+    suspend fun excluirUsuarioViaFunction(uid: String)
 }
 
 class FirestoreUsuarioRepository(
     private val firestore: FirebaseFirestore,
-    private val context: Context,
-    private val functions: FirebaseFunctions
+    private val context: Context
 ) : UsuarioRepository {
 
+    private val functions: FirebaseFunctions = FirebaseFunctions.getInstance()
+
     override fun observarUsuario(uid: String): Flow<Usuario?> = callbackFlow {
-        val listener = firestore.collection(USUARIOS).document(uid)
+        val listener = firestore.collection(COL_USUARIOS).document(uid)
             .addSnapshotListener { snapshot, erro ->
-                if (erro != null) { close(erro); return@addSnapshotListener }
+                if (erro != null) {
+                    close(erro)
+                    return@addSnapshotListener
+                }
                 trySend(snapshot?.toObject(Usuario::class.java))
             }
         awaitClose { listener.remove() }
     }
 
-    override fun observarEquipe(): Flow<List<Usuario>> = callbackFlow {
-        val listener = firestore.collection(USUARIOS)
+    override fun observarPerfil(perfilId: String): Flow<PerfilPermissao?> = callbackFlow {
+        if (perfilId.isBlank()) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+        val listener = firestore.collection(COL_PERFIS).document(perfilId)
             .addSnapshotListener { snapshot, erro ->
-                if (erro != null) { close(erro); return@addSnapshotListener }
-                trySend(snapshot?.toObjects(Usuario::class.java).orEmpty())
+                if (erro != null) {
+                    close(erro)
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.toObject(PerfilPermissao::class.java))
             }
         awaitClose { listener.remove() }
     }
 
     override fun observarPerfis(): Flow<List<PerfilPermissao>> = callbackFlow {
-        val listener = firestore.collection(PERFIS)
+        val listener = firestore.collection(COL_PERFIS)
             .addSnapshotListener { snapshot, erro ->
-                if (erro != null) { close(erro); return@addSnapshotListener }
+                if (erro != null) {
+                    close(erro)
+                    return@addSnapshotListener
+                }
                 trySend(snapshot?.toObjects(PerfilPermissao::class.java).orEmpty())
             }
         awaitClose { listener.remove() }
     }
 
-    override suspend fun buscarEmailPorUsername(username: String): String? {
-        val doc = firestore.collection(USUARIOS_POR_NOME)
-            .document(normalizarUsername(username))
-            .get().await()
-        return doc?.getString("email")
+    override fun observarEquipe(): Flow<List<Usuario>> = callbackFlow {
+        val listener = firestore.collection(COL_USUARIOS)
+            .addSnapshotListener { snapshot, erro ->
+                if (erro != null) {
+                    close(erro)
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.toObjects(Usuario::class.java).orEmpty())
+            }
+        awaitClose { listener.remove() }
     }
 
-    /** Aceita username ou e-mail; devolve o e-mail mascarado para confirmação. */
-    override suspend fun enviarRecuperacao(identificador: String): String {
-        val email = if (identificador.contains("@")) {
-            identificador.trim()
-        } else {
-            buscarEmailPorUsername(identificador)
-                ?: throw IllegalArgumentException("Usuário não encontrado.")
-        }
-        FirebaseAuth.getInstance().sendPasswordResetEmail(email).await()
-        return mascarar(email)
-    }
-
-    override suspend fun criarPerfisPadraoSeNecessario() {
-        val existentes = firestore.collection(PERFIS).limit(1).get().await()
-        if (!existentes.isEmpty) return
-
-        criarPerfil(
-            "Balcão",
-            listOf(
-                "criar_os",
-                "editar_os.dados",
-                "editar_os.compartilhar"
-            )
-        )
-        criarPerfil(
-            "Técnico",
-            listOf(
-                "criar_os",
-                "editar_os.dados",
-                "editar_os.compartilhar",
-                "editar_os.status",
-                "editar_os.fotos",
-                "dar_diagnostico",
-                "gerar_orcamento.valor",
-                "gerar_orcamento.revisao"
-            )
-        )
-    }
-
-    override suspend fun criarPerfil(nome: String, permissoes: List<String>): String {
-        val ref = firestore.collection(PERFIS)
-            .add(PerfilPermissao(nome = nome.trim(), permissoes = permissoes))
+    override suspend fun buscarPorUsername(username: String): UsuarioPorNome? {
+        val normalizado = Usernames.normalizar(username)
+        if (normalizado.isBlank()) return null
+        return firestore.collection(COL_NOMES).document(normalizado)
+            .get()
             .await()
-        return ref.id
+            ?.toObject(UsuarioPorNome::class.java)
     }
 
-    override suspend fun atualizarPerfil(id: String, nome: String, permissoes: List<String>) {
-        firestore.collection(PERFIS).document(id)
-            .update("nome", nome.trim(), "permissoes", permissoes)
-            .await()
-    }
-
-    override suspend fun excluirPerfil(id: String) {
-        firestore.collection(PERFIS).document(id).delete().await()
+    override suspend fun enviarResetSenha(email: String) {
+        FirebaseAuth.getInstance().sendPasswordResetEmail(email.trim()).await()
     }
 
     /**
-     * Cria a conta no Auth via FirebaseApp SECUNDÁRIO (não desloga o dono)
-     * e grava perfil + índice de username em batch atômico.
+     * O pulo do gato continua o mesmo: createUserWithEmailAndPassword troca
+     * a sessão da instância em que roda, então usamos um FirebaseApp
+     * SECUNDÁRIO e derrubamos só a sessão dele no final.
      */
     override suspend fun criarContaFuncionario(
-        nome: String, username: String, email: String, senha: String, perfilId: String
+        nome: String,
+        username: String,
+        email: String,
+        senha: String,
+        perfilId: String
     ): String = withContext(Dispatchers.IO) {
-        val userNorm = normalizarUsername(username)
-        validarUsername(userNorm)
+        val usernameNormalizado = Usernames.normalizar(username)
+        require(Usernames.valido(usernameNormalizado)) {
+            "Username inválido: use 3-20 caracteres (letras minúsculas, números, . _ -)"
+        }
 
-        // Unicidade: o ID do documento É o username — get barato antes,
-        // e o batch falha se outro cadastro concorrer no mesmo instante
-        val indice = firestore.collection(USUARIOS_POR_NOME).document(userNorm).get().await()
-        if (indice.exists()) throw IllegalArgumentException("Username já em uso.")
+        // Unicidade pré-checada para mensagem amigável (a garantia real
+        // continua sendo o create do documento, atômico no Firestore)
+        val existente = firestore.collection(COL_NOMES).document(usernameNormalizado)
+            .get().await()
+        require(!existe(existente)) { "Este username já está em uso." }
 
         val authSecundario = FirebaseAuth.getInstance(appSecundario())
         try {
-            val resultado = authSecundario.createUserWithEmailAndPassword(email.trim(), senha).await()
-            val uid = resultado.user?.uid ?: throw IllegalStateException("Auth não retornou UID")
+            val resultado = authSecundario
+                .createUserWithEmailAndPassword(email.trim(), senha)
+                .await()
+            val uid = resultado.user?.uid
+                ?: throw IllegalStateException("Auth não retornou UID")
 
-            firestore.batch().apply {
-                set(
-                    firestore.collection(USUARIOS).document(uid),
-                    Usuario(
-                        id = uid,
-                        nome = nome.trim(),
-                        username = userNorm,
-                        email = email.trim(),
-                        papel = Papeis.FUNCIONARIO,
-                        perfilId = perfilId,
-                        ativo = true,
-                        criadoEm = System.currentTimeMillis()
-                    )
+            val batch = firestore.batch()
+
+            batch.set(
+                firestore.collection(COL_USUARIOS).document(uid),
+                Usuario(
+                    id = uid,
+                    nome = nome.trim(),
+                    email = email.trim(),
+                    username = usernameNormalizado,
+                    papel = com.ddcrcodelab.pontocinformatica.data.model.Papeis.FUNCIONARIO,
+                    perfilId = perfilId,
+                    ativo = true,
+                    criadoEm = System.currentTimeMillis()
                 )
-                set(
-                    firestore.collection(USUARIOS_POR_NOME).document(userNorm),
-                    mapOf("uid" to uid, "email" to email.trim())
-                )
-            }.commit().await()
+            )
+            batch.set(
+                firestore.collection(COL_NOMES).document(usernameNormalizado),
+                UsuarioPorNome(id = usernameNormalizado, uid = uid, email = email.trim())
+            )
+            batch.commit().await()
             uid
         } finally {
             authSecundario.signOut()
@@ -177,91 +190,131 @@ class FirestoreUsuarioRepository(
     }
 
     override suspend fun atualizarUsuario(
-        uid: String, nome: String, username: String, perfilId: String
+        uid: String,
+        nome: String,
+        username: String,
+        perfilId: String
     ) {
-        val userNorm = normalizarUsername(username)
-        validarUsername(userNorm)
-
-        val atual = firestore.collection(USUARIOS).document(uid).get().await()
-        val usuario = atual.toObject(Usuario::class.java) ?: throw IllegalArgumentException("Usuário não encontrado.")
-        val email = usuario.email
-
-        val indiceNovo = firestore.collection(USUARIOS_POR_NOME).document(userNorm).get().await()
-        if (indiceNovo.exists() && indiceNovo.getString("uid") != uid) {
-            throw IllegalArgumentException("Username já em uso.")
+        val usernameNormalizado = Usernames.normalizar(username)
+        require(Usernames.valido(usernameNormalizado)) {
+            "Username inválido: use 3-20 caracteres (letras minúsculas, números, . _ -)"
         }
 
-        firestore.batch().apply {
-            update(
-                firestore.collection(USUARIOS).document(uid),
-                mapOf("nome" to nome.trim(), "username" to userNorm, "perfilId" to perfilId)
+        val docAtual = firestore.collection(COL_USUARIOS).document(uid).get().await()
+        val usuarioAtual = docAtual?.toObject(Usuario::class.java)
+            ?: throw IllegalStateException("Usuário não encontrado")
+
+        if (usernameNormalizado != usuarioAtual.username) {
+            val ocupado = firestore.collection(COL_NOMES).document(usernameNormalizado)
+                .get().await()
+            require(!existe(ocupado)) { "Este username já está em uso." }
+        }
+
+        val batch = firestore.batch()
+
+        batch.update(
+            firestore.collection(COL_USUARIOS).document(uid),
+            mapOf(
+                "nome" to nome.trim(),
+                "username" to usernameNormalizado,
+                "perfilId" to perfilId
             )
-            if (usuario.username.isNotBlank() && usuario.username != userNorm) {
-                delete(firestore.collection(USUARIOS_POR_NOME).document(usuario.username))
+        )
+        // Índice: troca o documento antigo pelo novo atomicamente
+        if (usernameNormalizado != usuarioAtual.username) {
+            if (usuarioAtual.username.isNotBlank()) {
+                batch.delete(firestore.collection(COL_NOMES).document(usuarioAtual.username))
             }
-            set(
-                firestore.collection(USUARIOS_POR_NOME).document(userNorm),
-                mapOf("uid" to uid, "email" to email)
+            batch.set(
+                firestore.collection(COL_NOMES).document(usernameNormalizado),
+                UsuarioPorNome(id = usernameNormalizado, uid = uid, email = usuarioAtual.email)
             )
-        }.commit().await()
+        }
+        batch.commit().await()
     }
 
     override suspend fun definirAtivo(uid: String, ativo: Boolean) {
-        firestore.collection(USUARIOS).document(uid).update("ativo", ativo).await()
-    }
-
-    /** Gera senha temporária e aplica via Cloud Function (Admin SDK). */
-    override suspend fun redefinirSenha(uid: String): String {
-        val temporaria = gerarSenhaTemporaria()
-        functions.getHttpsCallable("redefinirSenha")
-            .call(hashMapOf("uid" to uid, "novaSenha" to temporaria))
+        firestore.collection(COL_USUARIOS).document(uid)
+            .update("ativo", ativo)
             .await()
-        return temporaria
     }
 
-    override suspend fun excluirUsuario(uid: String) {
+    override suspend fun limparFlagSenhaTemporaria(uid: String) {
+        firestore.collection(COL_USUARIOS).document(uid)
+            .update("senhaTemporaria", false)
+            .await()
+    }
+
+    override suspend fun salvarPerfil(perfil: PerfilPermissao): String {
+        require(perfil.nome.isNotBlank()) { "Dê um nome ao perfil." }
+        val ref = if (perfil.id.isBlank()) {
+            firestore.collection(COL_PERFIS).document()
+        } else {
+            firestore.collection(COL_PERFIS).document(perfil.id)
+        }
+        ref.set(perfil.copy(id = ref.id)).await()
+        return ref.id
+    }
+
+    override suspend fun excluirPerfil(perfilId: String) {
+        // Impede excluir perfil ainda vinculado a alguém
+        val vinculados = firestore.collection(COL_USUARIOS)
+            .whereEqualTo("perfilId", perfilId)
+            .limit(1)
+            .get()
+            .await()
+        require(vinculados.isEmpty) {
+            "Há usuários vinculados a este perfil. Mude-os de perfil antes de excluir."
+        }
+        firestore.collection(COL_PERFIS).document(perfilId).delete().await()
+    }
+
+    override suspend fun garantirPresets() {
+        val existentes = firestore.collection(COL_PERFIS).limit(1).get().await()
+        if (!existentes.isEmpty) return
+
+        val batch = firestore.batch()
+        val balcao = firestore.collection(COL_PERFIS).document()
+        batch.set(balcao, PerfilPermissao(id = balcao.id, nome = "Balcão", permissoes = Permissoes.PRESET_BALCAO))
+        val tecnico = firestore.collection(COL_PERFIS).document()
+        batch.set(tecnico, PerfilPermissao(id = tecnico.id, nome = "Técnico", permissoes = Permissoes.PRESET_TECNICO))
+        batch.commit().await()
+    }
+
+    override suspend fun redefinirSenhaViaFunction(uid: String): String {
+        val resposta = functions.getHttpsCallable("redefinirSenha")
+            .call(mapOf("uid" to uid))
+            .await()
+        val dados = resposta.data as? Map<*, *>
+            ?: throw IllegalStateException("Resposta inválida da Function")
+        return dados["senhaTemporaria"] as? String
+            ?: throw IllegalStateException("Function não retornou a senha")
+    }
+
+    override suspend fun excluirUsuarioViaFunction(uid: String) {
         functions.getHttpsCallable("excluirUsuario")
-            .call(hashMapOf("uid" to uid))
+            .call(mapOf("uid" to uid))
             .await()
     }
 
-    // ===== utilidades =====
+    private fun existe(snapshot: com.google.firebase.firestore.DocumentSnapshot?) =
+        snapshot != null && snapshot.exists()
 
+    /** FirebaseApp isolado, usado só para cadastro (não desloga o dono). */
     private fun appSecundario(): FirebaseApp = try {
         FirebaseApp.getInstance(APP_SECUNDARIO)
     } catch (e: IllegalStateException) {
-        FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, APP_SECUNDARIO)
-    }
-
-    private fun normalizarUsername(bruto: String): String =
-        bruto.trim().lowercase().replace(" ", "_")
-
-    private fun validarUsername(username: String) {
-        val valido = Regex("^[a-z0-9._-]{3,20}$").matches(username)
-        if (!valido) {
-            throw IllegalArgumentException(
-                "Username: 3-20 caracteres, minúsculas, números, . _ -"
-            )
-        }
-    }
-
-    private fun mascarar(email: String): String {
-        val partes = email.split("@")
-        if (partes.size != 2) return email
-        val nome = partes[0]
-        val visivel = nome.take(2)
-        return "$visivel***@${partes[1]}"
-    }
-
-    private fun gerarSenhaTemporaria(): String {
-        val chars = ("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789")
-        return (1..8).map { chars[Random.nextInt(chars.length)] }.joinToString("")
+        FirebaseApp.initializeApp(
+            context,
+            FirebaseApp.getInstance().options,
+            APP_SECUNDARIO
+        )
     }
 
     private companion object {
-        const val USUARIOS = "usuarios"
-        const val PERFIS = "perfis"
-        const val USUARIOS_POR_NOME = "usuariosPorNome"
+        const val COL_USUARIOS = "usuarios"
+        const val COL_PERFIS = "perfis"
+        const val COL_NOMES = "usuariosPorNome"
         const val APP_SECUNDARIO = "auth-cadastro-equipe"
     }
 }

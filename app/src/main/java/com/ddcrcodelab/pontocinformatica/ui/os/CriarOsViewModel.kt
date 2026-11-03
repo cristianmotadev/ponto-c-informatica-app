@@ -29,9 +29,10 @@ class CriarOsViewModel(
         aparelhoMarca: String,
         aparelhoModelo: String,
         defeitoRelatado: String,
-        prazoDias: Int
+        prazoDias: Int,
+        superficial: Boolean,
+        valorEstimado: Double
     ) {
-        // Validação mínima para não criar OS "fantasma" na lista
         if (clienteNome.isBlank() || aparelhoModelo.isBlank() || defeitoRelatado.isBlank()) {
             _uiState.value = CriarOsUiState(erro = "Preencha nome, modelo e defeito.")
             return
@@ -50,7 +51,9 @@ class CriarOsViewModel(
                     prazoDias = prazoDias,
                     dataEntrada = agora,
                     previsaoEntrega = agora + prazoDias * 86_400_000L,
-                    criadoPor = FirebaseAuth.getInstance().uid.orEmpty()
+                    criadoPor = FirebaseAuth.getInstance().uid.orEmpty(),
+                    orcamentoSuperficial = superficial,
+                    valorOrcado = valorEstimado
                 )
                 repository.criarOrdem(ordem)
                 _uiState.value = CriarOsUiState(salvoComSucesso = true)

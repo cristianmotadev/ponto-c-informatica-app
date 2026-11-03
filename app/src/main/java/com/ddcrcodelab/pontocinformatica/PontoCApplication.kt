@@ -2,21 +2,24 @@ package com.ddcrcodelab.pontocinformatica
 
 import android.app.Application
 import com.ddcrcodelab.pontocinformatica.di.appModule
+import com.ddcrcodelab.pontocinformatica.util.SessaoManager
+import org.koin.android.ext.android.inject
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
 
-/**
- * Ponto de entrada antes de qualquer Activity: o Koin precisa estar
- * iniciado aqui para que qualquer tela consiga receber dependências.
- */
 class PontoCApplication : Application() {
+
+    private val sessaoManager: SessaoManager by inject()
+
     override fun onCreate() {
         super.onCreate()
         startKoin {
-            androidLogger() // loga o que o Koin resolve — ajuda a depurar
+            androidLogger()
             androidContext(this@PontoCApplication)
             modules(appModule)
         }
+        // Inicia a observação da sessão (quem está logado + permissões)
+        sessaoManager.iniciar()
     }
 }

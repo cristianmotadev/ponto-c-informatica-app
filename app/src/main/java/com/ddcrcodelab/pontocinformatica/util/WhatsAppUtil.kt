@@ -50,6 +50,7 @@ object WhatsAppUtil {
             StatusOS.EM_REPARO -> "em reparo na bancada 🔧"
             StatusOS.PRONTO -> "PRONTO para retirada! 🎉"
             StatusOS.ENTREGUE -> "entregue. Obrigado pela confiança! 🙏"
+            StatusOS.CANCELADO -> "cancelado"
         }
         val aparelho = "${ordem.aparelhoMarca} ${ordem.aparelhoModelo}".trim()
 

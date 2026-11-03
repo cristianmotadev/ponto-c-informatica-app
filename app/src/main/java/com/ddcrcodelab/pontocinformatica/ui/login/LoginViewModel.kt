@@ -14,13 +14,14 @@ import kotlinx.coroutines.tasks.await
 data class LoginUiState(
     val carregando: Boolean = false,
     val erro: String? = null,
-    val logado: Boolean = false,
-    val recuperando: Boolean = false,
-    val mensagemRecuperacao: String? = null
+    val sucesso: Boolean = false,
+    val enviandoReset: Boolean = false,
+    val resetEnviado: Boolean = false,
+    val erroReset: String? = null
 )
 
 class LoginViewModel(
-    private val repository: UsuarioRepository
+    private val usuarioRepository: UsuarioRepository
 ) : ViewModel() {
 
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
@@ -28,65 +29,86 @@ class LoginViewModel(
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    /** Aceita username OU e-mail no mesmo campo. */
+    /**
+     * FASE 11: o campo aceita username OU e-mail.
+     * Tem "@" → e-mail direto. Sem "@" → normaliza e busca no índice
+     * usuariosPorNome para descobrir o e-mail de auth.
+     */
     fun entrar(identificador: String, senha: String) {
         if (identificador.isBlank() || senha.isBlank()) {
-            _uiState.value = LoginUiState(erro = "Preencha usuário e senha.")
+            _uiState.value = _uiState.value.copy(erro = "Preencha usuário e senha.")
             return
         }
 
         viewModelScope.launch {
-            _uiState.value = LoginUiState(carregando = true)
+            _uiState.value = _uiState.value.copy(carregando = true, erro = null)
             try {
-                val email = if (identificador.contains("@")) {
-                    identificador.trim()
-                } else {
-                    repository.buscarEmailPorUsername(identificador)
-                        ?: run {
-                            _uiState.value = LoginUiState(erro = "Usuário não encontrado.")
-                            return@launch
-                        }
-                }
+                val email = resolverEmail(identificador)
+                    ?: throw IllegalArgumentException(
+                        if (identificador.contains("@")) "Conta não encontrada."
+                        else "Usuário não encontrado."
+                    )
+
                 auth.signInWithEmailAndPassword(email, senha).await()
-                _uiState.value = LoginUiState(logado = true)
+                _uiState.value = _uiState.value.copy(carregando = false, sucesso = true)
             } catch (e: FirebaseAuthException) {
-                _uiState.value = LoginUiState(erro = mensagemAmigavel(e.errorCode))
-            }
-        }
-    }
-
-    /** Envia link de recuperação para o e-mail real cadastrado. */
-    fun recuperarSenha(identificador: String) {
-        if (identificador.isBlank()) {
-            _uiState.value = _uiState.value.copy(erro = "Informe usuário ou e-mail.")
-            return
-        }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(recuperando = true, erro = null)
-            try {
-                val mascarado = repository.enviarRecuperacao(identificador)
                 _uiState.value = _uiState.value.copy(
-                    recuperando = false,
-                    mensagemRecuperacao = "Link de recuperação enviado para $mascarado"
+                    carregando = false,
+                    erro = mensagemAuth(e.errorCode)
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    recuperando = false,
-                    erro = e.message ?: "Falha na recuperação."
+                    carregando = false,
+                    erro = e.message ?: "Falha no login."
                 )
             }
         }
     }
 
-    fun limparMensagemRecuperacao() {
-        _uiState.value = _uiState.value.copy(mensagemRecuperacao = null, erro = null)
+    /** Recuperação: aceita username ou e-mail; o link vai para o e-mail real. */
+    fun recuperarSenha(identificador: String) {
+        if (identificador.isBlank()) {
+            _uiState.value = _uiState.value.copy(erroReset = "Informe usuário ou e-mail.")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(enviandoReset = true, erroReset = null)
+            try {
+                val email = resolverEmail(identificador)
+                    ?: throw IllegalArgumentException("Conta não encontrada.")
+                usuarioRepository.enviarResetSenha(email)
+                _uiState.value = _uiState.value.copy(enviandoReset = false, resetEnviado = true)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    enviandoReset = false,
+                    erroReset = e.message ?: "Não foi possível enviar o e-mail."
+                )
+            }
+        }
     }
 
-    private fun mensagemAmigavel(codigo: String): String = when (codigo) {
-        "ERROR_INVALID_EMAIL" -> "E-mail inválido."
-        "ERROR_USER_NOT_FOUND" -> "Usuário não encontrado."
-        "ERROR_WRONG_PASSWORD" -> "Senha incorreta."
-        "ERROR_INVALID_CREDENTIAL" -> "Credenciais incorretas."
-        else -> "Não foi possível entrar. Tente novamente."
+    fun consumirSucesso() {
+        _uiState.value = _uiState.value.copy(sucesso = false)
+    }
+
+    fun consumirReset() {
+        _uiState.value = _uiState.value.copy(resetEnviado = false)
+    }
+
+    private suspend fun resolverEmail(identificador: String): String? =
+        if (identificador.contains("@")) {
+            identificador.trim()
+        } else {
+            usuarioRepository.buscarPorUsername(identificador)?.email
+        }
+
+    private fun mensagemAuth(codigo: String): String = when (codigo) {
+        "ERROR_INVALID_LOGIN_CREDENTIALS",
+        "ERROR_WRONG_PASSWORD" -> "Usuário ou senha incorretos."
+        "ERROR_USER_NOT_FOUND" -> "Conta não encontrada."
+        "ERROR_USER_DISABLED" -> "Conta desativada. Fale com o responsável."
+        "ERROR_TOO_MANY_REQUESTS" -> "Muitas tentativas. Aguarde alguns minutos."
+        else -> "Não foi possível entrar."
     }
 }

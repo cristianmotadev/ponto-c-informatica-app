@@ -6,7 +6,6 @@ import com.ddcrcodelab.pontocinformatica.data.model.PerfilPermissao
 import com.ddcrcodelab.pontocinformatica.data.model.Usuario
 import com.ddcrcodelab.pontocinformatica.data.repository.UsuarioRepository
 import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,8 +20,7 @@ data class FuncionariosUiState(
     val ocupado: Boolean = false,
     val erroCadastro: String? = null,
     val criadoComSucesso: Boolean = false,
-    // nome -> senha temporária (exibida uma única vez)
-    val senhaTemporaria: Pair<String, String>? = null
+    val senhaTemporaria: Pair<String, String>? = null // nome do usuário → senha
 )
 
 class FuncionariosViewModel(
@@ -35,7 +33,7 @@ class FuncionariosViewModel(
     init {
         // Seed dos perfis padrão: falha aqui NUNCA pode derrubar o app
         viewModelScope.launch {
-            runCatching { repository.criarPerfisPadraoSeNecessario() }
+            runCatching { repository.garantirPresets() }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(erro = mensagemErro(e), carregando = false)
                 }
@@ -62,11 +60,106 @@ class FuncionariosViewModel(
                     _uiState.value = _uiState.value.copy(erro = mensagemErro(e), carregando = false)
                 }
                 .collect { perfis ->
-                    _uiState.value = _uiState.value.copy(
-                        perfis = perfis.sortedBy { it.nome },
-                        carregando = false
-                    )
+                    _uiState.value = _uiState.value.copy(perfis = perfis)
                 }
+        }
+    }
+
+    // ===== Usuários =====
+
+    fun criarFuncionario(
+        nome: String,
+        username: String,
+        email: String,
+        senha: String,
+        perfilId: String
+    ) {
+        if (nome.isBlank() || username.isBlank() || email.isBlank() || senha.length < 6) {
+            _uiState.value = _uiState.value.copy(
+                erroCadastro = "Preencha nome, username, e-mail e senha (mín. 6 caracteres)."
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true, erroCadastro = null)
+            try {
+                repository.criarContaFuncionario(nome, username, email, senha, perfilId)
+                _uiState.value = _uiState.value.copy(ocupado = false, criadoComSucesso = true)
+            } catch (e: FirebaseAuthException) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erroCadastro = mensagemAuth(e.errorCode)
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erroCadastro = e.message ?: "Falha ao criar conta."
+                )
+            }
+        }
+    }
+
+    fun atualizarUsuario(uid: String, nome: String, username: String, perfilId: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true, erro = null)
+            try {
+                repository.atualizarUsuario(uid, nome, username, perfilId)
+                _uiState.value = _uiState.value.copy(ocupado = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erro = mensagemErro(e)
+                )
+            }
+        }
+    }
+
+    fun definirAtivo(uid: String, ativo: Boolean) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true, erro = null)
+            try {
+                repository.definirAtivo(uid, ativo)
+                _uiState.value = _uiState.value.copy(ocupado = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erro = mensagemErro(e)
+                )
+            }
+        }
+    }
+
+    fun redefinirSenha(usuario: Usuario) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true)
+            try {
+                val temporaria = repository.redefinirSenhaViaFunction(usuario.id)
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    senhaTemporaria = usuario.nome to temporaria
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erro = mensagemErro(e)
+                )
+            }
+        }
+    }
+
+    fun excluirUsuario(usuario: Usuario) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true)
+            try {
+                repository.excluirUsuarioViaFunction(usuario.id)
+                _uiState.value = _uiState.value.copy(ocupado = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erro = mensagemErro(e)
+                )
+            }
         }
     }
 
@@ -77,14 +170,24 @@ class FuncionariosViewModel(
             _uiState.value = _uiState.value.copy(erroCadastro = "Dê um nome ao perfil.")
             return
         }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(ocupado = true, erroCadastro = null)
             try {
-                if (id == null) repository.criarPerfil(nome, permissoes)
-                else repository.atualizarPerfil(id, nome, permissoes)
+                // salvarPerfil serve tanto para criar (id vazio) quanto atualizar
+                repository.salvarPerfil(
+                    PerfilPermissao(
+                        id = id ?: "",
+                        nome = nome,
+                        permissoes = permissoes
+                    )
+                )
                 _uiState.value = _uiState.value.copy(ocupado = false, criadoComSucesso = true)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(ocupado = false, erroCadastro = e.message)
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erroCadastro = e.message ?: "Falha ao salvar perfil."
+                )
             }
         }
     }
@@ -97,118 +200,35 @@ class FuncionariosViewModel(
             )
             return
         }
+
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ocupado = true, erro = null)
             try {
                 repository.excluirPerfil(perfil.id)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(erro = mensagemErro(e))
-            }
-        }
-    }
-
-    // ===== Pessoas =====
-
-    fun salvarFuncionario(
-        uid: String?,
-        nome: String,
-        username: String,
-        email: String,
-        senha: String,
-        perfilId: String
-    ) {
-        if (nome.isBlank() || username.isBlank() || perfilId.isBlank()) {
-            _uiState.value = _uiState.value.copy(erroCadastro = "Preencha nome, username e perfil.")
-            return
-        }
-        // Criação exige e-mail válido (é a credencial real do Auth;
-        // username é só um apelido de login)
-        if (uid == null && !email.trim().contains("@")) {
-            _uiState.value = _uiState.value.copy(erroCadastro = "Informe um e-mail válido para recuperação.")
-            return
-        }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ocupado = true, erroCadastro = null)
-            try {
-                if (uid == null) {
-                    if (senha.length < 6) {
-                        _uiState.value = _uiState.value.copy(
-                            ocupado = false, erroCadastro = "Senha mínima: 6 caracteres."
-                        )
-                        return@launch
-                    }
-                    repository.criarContaFuncionario(nome, username, email, senha, perfilId)
-                } else {
-                    repository.atualizarUsuario(uid, nome, username, perfilId)
-                }
-                _uiState.value = _uiState.value.copy(ocupado = false, criadoComSucesso = true)
-            } catch (e: FirebaseAuthException) {
-                _uiState.value = _uiState.value.copy(
-                    ocupado = false, erroCadastro = mensagemAuth(e.errorCode)
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(ocupado = false, erroCadastro = e.message)
-            }
-        }
-    }
-
-    fun definirAtivo(uid: String, ativo: Boolean) {
-        viewModelScope.launch {
-            try {
-                repository.definirAtivo(uid, ativo)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(erro = mensagemErro(e))
-            }
-        }
-    }
-
-    fun redefinirSenha(usuario: Usuario) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ocupado = true)
-            try {
-                val temporaria = repository.redefinirSenha(usuario.id)
-                _uiState.value = _uiState.value.copy(
-                    ocupado = false,
-                    senhaTemporaria = usuario.nome to temporaria
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(ocupado = false, erro = mensagemErro(e))
-            }
-        }
-    }
-
-    fun excluirUsuario(usuario: Usuario) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ocupado = true)
-            try {
-                repository.excluirUsuario(usuario.id)
                 _uiState.value = _uiState.value.copy(ocupado = false)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(ocupado = false, erro = mensagemErro(e))
+                _uiState.value = _uiState.value.copy(
+                    ocupado = false,
+                    erro = mensagemErro(e)
+                )
             }
         }
     }
 
+    // ===== Consumidores de estado =====
+
     fun consumirSucesso() {
-        _uiState.value = _uiState.value.copy(criadoComSucesso = false, erroCadastro = null)
+        _uiState.value = _uiState.value.copy(criadoComSucesso = false)
     }
 
     fun consumirSenhaTemporaria() {
         _uiState.value = _uiState.value.copy(senhaTemporaria = null)
     }
 
-    fun limparErro() {
-        _uiState.value = _uiState.value.copy(erro = null)
-    }
+    // ===== Helpers =====
 
-    // ===== Mensagens =====
-
-    /** PERMISSION_DENIED vira orientação acionável, não stacktrace. */
     private fun mensagemErro(e: Throwable): String =
-        if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-            "Sem permissão: publique as regras do Firestore e confira se seu usuário é o dono."
-        } else {
-            e.message ?: "Erro inesperado."
-        }
+        e.message ?: "Falha inesperada."
 
     private fun mensagemAuth(codigo: String): String = when (codigo) {
         "ERROR_EMAIL_ALREADY_IN_USE" -> "Este e-mail já possui conta."

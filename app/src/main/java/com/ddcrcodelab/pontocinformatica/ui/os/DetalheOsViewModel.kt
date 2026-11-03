@@ -194,6 +194,23 @@ class DetalheOsViewModel(
         _uiState.value = _uiState.value.copy(pdfGerado = null)
     }
 
+    /** FASE 13: converte OS superficial em completa. */
+    fun converterEmCompleta() {
+        val osId = _uiState.value.ordem?.id ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(salvando = true)
+            try {
+                repository.converterEmCompleta(osId)
+                _uiState.value = _uiState.value.copy(salvando = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    salvando = false,
+                    erro = "Falha ao converter: ${e.message}"
+                )
+            }
+        }
+    }
+
     private suspend fun comprimirImagem(uri: Uri): ByteArray = withContext(Dispatchers.IO) {
         val stream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Não foi possível abrir a imagem")
