@@ -1,37 +1,38 @@
-*.iml
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-/build
-/captures
-.externalNativeBuild
-.cxx
-# === Build ===
+# ===== Gradle / Android =====
 .gradle/
 build/
-*.iml
-.idea/
+app/build/
 local.properties
 captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
 
-# === Android Studio ===
+# ===== IDE =====
+.idea/
+*.iml
+
+# ===== Artefatos: APKs sobem no GitHub Releases manualmente, nunca via commit =====
 *.apk
 *.aab
-*.ap_
-*.dex
 
-# === Keystore (NUNCA subir — perder isso = nunca mais atualizar o app) ===
+# ===== SEGREDOS: jamais commitar =====
 *.jks
 *.keystore
-keystore/
+*.p12
+keystore.properties
+secrets.properties
+.env
 
-# === Sistema ===
+# ===== Firebase CLI (cache e logs) =====
+.firebase/
+site-cliente/.firebase/
+firebase-debug.log
+firebase-debug.*.log
+functions/*.local
+site-cliente/functions/*.local
+node_modules/
+
+# ===== Sistema =====
 .DS_Store
 Thumbs.db
-
-# === Site-cliente (dependências npm, se vier a ter) ===
-site-cliente/node_modules/
