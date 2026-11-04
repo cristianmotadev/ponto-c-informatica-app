@@ -15,6 +15,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,8 +44,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ddcrcodelab.pontocinformatica.data.ThemePreferences
 import com.ddcrcodelab.pontocinformatica.data.model.OrdemServico
+import com.ddcrcodelab.pontocinformatica.data.repository.PedidosNotificacoesRepository
 import com.ddcrcodelab.pontocinformatica.ui.theme.ThemeMode
 import com.ddcrcodelab.pontocinformatica.util.SessaoManager
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
@@ -50,6 +55,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.ceil
+import com.ddcrcodelab.pontocinformatica.ui.components.BannerAtualizacao
+import com.ddcrcodelab.pontocinformatica.util.VerificadorAtualizacao
 
 // SimpleDateFormat: java.time exigiria desugaring no minSdk 24
 private val formatoData = SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR"))
@@ -74,16 +81,29 @@ fun ListaOsScreen(
     aoAbrirDetalhe: (String) -> Unit,
     aoAbrirEquipe: () -> Unit,
     aoAbrirPerfil: () -> Unit,
+    aoAbrirPedidos: () -> Unit,
+    aoAbrirNotificacoes: () -> Unit,
     aoSair: () -> Unit,
     viewModel: ListaOsViewModel = koinViewModel(),
-    sessao: SessaoManager = koinInject()
+    sessao: SessaoManager = koinInject(),
+    repoNotificacoes: PedidosNotificacoesRepository = koinInject(),
+    verificador: VerificadorAtualizacao = koinInject()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // FASE 12: identidade para o cabeçalho da gaveta
+    // Identidade da gaveta + badge do sino
     val usuario by sessao.usuario.collectAsStateWithLifecycle()
     val perfil by sessao.perfil.collectAsStateWithLifecycle()
     val ehDono by sessao.ehDono.collectAsStateWithLifecycle()
+
+    val uid = usuario?.id
+    val naoLidas by remember(uid) {
+        if (uid == null) flowOf(0) else repoNotificacoes.observarContagemNaoLidas(uid)
+    }.collectAsStateWithLifecycle(initialValue = 0)
+
+    // FASE 14: cheque de atualização (rate-limit de 1x/dia dentro do verificador)
+    val atualizacao by verificador.atualizacao.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { verificador.verificarSePrecisa() }
 
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val escopoDrawer = rememberCoroutineScope()
@@ -94,6 +114,11 @@ fun ListaOsScreen(
     val themeMode by themePrefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
     val escopo = rememberCoroutineScope()
 
+    fun fecharGavetaE(ir: () -> Unit) {
+        escopoDrawer.launch { drawerState.close() }
+        ir()
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -102,10 +127,7 @@ fun ListaOsScreen(
 
                 // Cabeçalho: nome completo + perfil de permissão
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = usuario?.nome.orEmpty(),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Text(usuario?.nome.orEmpty(), style = MaterialTheme.typography.titleLarge)
                     Text(
                         text = if (ehDono) "Perfil: Dono" else "Perfil: ${perfil?.nome ?: "—"}",
                         color = MaterialTheme.colorScheme.primary,
@@ -118,25 +140,25 @@ fun ListaOsScreen(
                 NavigationDrawerItem(
                     label = { Text("Meu perfil") },
                     selected = false,
-                    onClick = {
-                        escopoDrawer.launch { drawerState.close() }
-                        aoAbrirPerfil()
-                    }
+                    onClick = { fecharGavetaE(aoAbrirPerfil) }
                 )
-
-                // Pedidos de peça e Notificações entram na Fase 13 aqui
-
+                NavigationDrawerItem(
+                    label = { Text("📦 Pedidos de peça") },
+                    selected = false,
+                    onClick = { fecharGavetaE(aoAbrirPedidos) }
+                )
+                NavigationDrawerItem(
+                    label = { Text("🔔 Notificações") },
+                    selected = false,
+                    onClick = { fecharGavetaE(aoAbrirNotificacoes) }
+                )
                 if (ehDono) {
                     NavigationDrawerItem(
                         label = { Text("Equipe") },
                         selected = false,
-                        onClick = {
-                            escopoDrawer.launch { drawerState.close() }
-                            aoAbrirEquipe()
-                        }
+                        onClick = { fecharGavetaE(aoAbrirEquipe) }
                     )
                 }
-
                 NavigationDrawerItem(
                     label = { Text("Sair") },
                     selected = false,
@@ -153,7 +175,6 @@ fun ListaOsScreen(
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // FASE 12: hamburger abre a gaveta
                     IconButton(onClick = { escopoDrawer.launch { drawerState.open() } }) {
                         Icon(Icons.Default.Menu, contentDescription = "Abrir menu")
                     }
@@ -163,6 +184,19 @@ fun ListaOsScreen(
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f)
                     )
+
+                    // FASE 13: sino com badge de não lidas
+                    IconButton(onClick = aoAbrirNotificacoes) {
+                        BadgedBox(
+                            badge = {
+                                if (naoLidas > 0) {
+                                    Badge { Text("$naoLidas") }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Notificações")
+                        }
+                    }
 
                     TextButton(onClick = {
                         val proximo = when (themeMode) {
@@ -190,12 +224,21 @@ fun ListaOsScreen(
                 }
             }
         ) { padding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                when {
+                // FASE 14: banner de atualização acima de tudo
+                atualizacao?.let {
+                    BannerAtualizacao(
+                        atualizacao = it,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when {
                     state.bloqueado -> Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -236,11 +279,9 @@ fun ListaOsScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(state.ordens, key = { it.id }) { ordem ->
-                            CardOs(
-                                ordem = ordem,
-                                aoClicar = { aoAbrirDetalhe(ordem.id) }
-                            )
+                            CardOs(ordem = ordem, aoClicar = { aoAbrirDetalhe(ordem.id) })
                         }
+                    }
                     }
                 }
             }

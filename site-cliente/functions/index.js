@@ -1,4 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -23,8 +24,6 @@ exports.redefinirSenha = onCall(async (request) => {
 
   const temp = Math.random().toString(36).slice(2, 10) + "A1!";
   await admin.auth().updateUser(uid, { password: temp });
-
-  // FASE 12: obriga o funcionário a trocar no próximo login
   await admin.firestore().collection("usuarios").doc(uid).update({
     senhaTemporaria: true
   });
@@ -52,4 +51,74 @@ exports.excluirUsuario = onCall(async (request) => {
     await db.collection("usuarios").doc(uid).delete();
   }
   return { ok: true };
+});
+
+// ===== FASE 13: expansão de notificações (servidor, à prova de app fechado) =====
+
+/** Pedido criado → notifica TODOS os donos. */
+exports.notificarPedidoCriado = onDocumentCreated("pedidosPeca/{pedidoId}", async (event) => {
+  const pedido = event.data && event.data.data();
+  if (!pedido) return;
+
+  const db = admin.firestore();
+  const donos = await db.collection("usuarios").where("papel", "==", "dono").get();
+  if (donos.empty) return;
+
+  const batch = db.batch();
+  donos.forEach((dono) => {
+    batch.set(db.collection("notificacoes").doc(), {
+      destinatarioUid: dono.id,
+      titulo: "📦 Novo pedido de peça",
+      mensagem: `${pedido.solicitanteNome} pediu ${pedido.quantidade}x ${pedido.marca} ${pedido.modelo}` +
+        (pedido.osReferencia ? ` (OS: ${pedido.osReferencia})` : ""),
+      tipo: "pedido_criado",
+      lida: false,
+      criadaEm: Date.now()
+    });
+  });
+  await batch.commit();
+});
+
+/** Pedido respondeu/cancelou → notifica a outra ponta. */
+exports.notificarPedidoMovimentado = onDocumentUpdated("pedidosPeca/{pedidoId}", async (event) => {
+  const antes = event.data && event.data.before.data();
+  const depois = event.data && event.data.after.data();
+  if (!antes || !depois || antes.status === depois.status) return;
+  if (antes.status !== "PENDENTE") return; // só a primeira decisão gera aviso
+
+  const db = admin.firestore();
+
+  // Funcionário cancelou → avisa os donos
+  if (depois.status === "CANCELADO") {
+    const donos = await db.collection("usuarios").where("papel", "==", "dono").get();
+    const batch = db.batch();
+    donos.forEach((dono) => {
+      batch.set(db.collection("notificacoes").doc(), {
+        destinatarioUid: dono.id,
+        titulo: "📦 Pedido cancelado",
+        mensagem: `${depois.solicitanteNome} cancelou o pedido de ${depois.quantidade}x ${depois.marca} ${depois.modelo}`,
+        tipo: "pedido_cancelado",
+        lida: false,
+        criadaEm: Date.now()
+      });
+    });
+    await batch.commit();
+    return;
+  }
+
+  // Dono aprovou/recusou → avisa o solicitante
+  const aprovado = depois.status === "APROVADO";
+  await db.collection("notificacoes").add({
+    destinatarioUid: depois.solicitanteUid,
+    titulo: aprovado ? "✅ Pedido aprovado" : "❌ Pedido recusado",
+    mensagem: aprovado
+      ? `Seu pedido de ${depois.quantidade}x ${depois.marca} ${depois.modelo} foi aprovado.` +
+        (depois.previsao ? ` Previsão: ${depois.previsao}.` : "") +
+        (depois.mensagemResposta ? ` ${depois.mensagemResposta}` : "")
+      : `Seu pedido de ${depois.quantidade}x ${depois.marca} ${depois.modelo} foi recusado. Motivo: ${depois.mensagemResposta}` +
+        (depois.previsao ? ` Possível previsão: ${depois.previsao}.` : ""),
+    tipo: "pedido_respondido",
+    lida: false,
+    criadaEm: Date.now()
+  });
 });

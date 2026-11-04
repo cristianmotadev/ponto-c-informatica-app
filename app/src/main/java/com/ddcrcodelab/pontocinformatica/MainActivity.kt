@@ -7,7 +7,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -19,9 +18,11 @@ import androidx.navigation.compose.rememberNavController
 import com.ddcrcodelab.pontocinformatica.data.ThemePreferences
 import com.ddcrcodelab.pontocinformatica.ui.funcionarios.FuncionariosScreen
 import com.ddcrcodelab.pontocinformatica.ui.login.LoginScreen
+import com.ddcrcodelab.pontocinformatica.ui.notificacoes.NotificacoesScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.CriarOsScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.DetalheOsScreen
 import com.ddcrcodelab.pontocinformatica.ui.os.ListaOsScreen
+import com.ddcrcodelab.pontocinformatica.ui.pedidos.PedidosScreen
 import com.ddcrcodelab.pontocinformatica.ui.perfil.MeuPerfilScreen
 import com.ddcrcodelab.pontocinformatica.ui.theme.PontoCTheme
 import com.ddcrcodelab.pontocinformatica.ui.theme.ThemeMode
@@ -35,7 +36,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val themePrefs = remember { ThemePreferences(applicationContext) }
-            val themeMode by themePrefs.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+            val themeMode by themePrefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
 
             PontoCTheme(themeMode = themeMode) {
                 val sessao: SessaoManager = koinInject()
@@ -44,14 +45,12 @@ class MainActivity : ComponentActivity() {
                 val logado = FirebaseAuth.getInstance().currentUser != null
 
                 when {
-                    // FASE 12: senha redefinida pelo dono → troca obrigatória.
-                    // Envolve TUDO: não há voltar, não há gaveta, não há lista.
+                    // Senha redefinida pelo dono → troca obrigatória trava o app
                     logado && usuarioSessao?.senhaTemporaria == true -> {
                         MeuPerfilScreen(obrigatoria = true)
                     }
 
-                    // Logado mas o perfil ainda não chegou do Firestore:
-                    // evita "flash" da tela errada antes do gate decidir
+                    // Aguarda o perfil chegar antes de decidir a rota inicial
                     logado && usuarioSessao == null -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
@@ -78,18 +77,16 @@ class MainActivity : ComponentActivity() {
                                     aoAbrirDetalhe = { osId -> navController.navigate("detalhe/$osId") },
                                     aoAbrirEquipe = { navController.navigate("funcionarios") },
                                     aoAbrirPerfil = { navController.navigate("perfil") },
+                                    aoAbrirPedidos = { navController.navigate("pedidos") },
+                                    aoAbrirNotificacoes = { navController.navigate("notificacoes") },
                                     aoSair = {
                                         FirebaseAuth.getInstance().signOut()
-                                        navController.navigate("login") {
-                                            popUpTo(0)
-                                        }
+                                        navController.navigate("login") { popUpTo(0) }
                                     }
                                 )
                             }
                             composable("criar_os") {
-                                CriarOsScreen(
-                                    aoSalvar = { navController.popBackStack() }
-                                )
+                                CriarOsScreen(aoSalvar = { navController.popBackStack() })
                             }
                             composable("detalhe/{osId}") { backStack ->
                                 DetalheOsScreen(
@@ -98,14 +95,16 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             composable("funcionarios") {
-                                FuncionariosScreen(
-                                    aoVoltar = { navController.popBackStack() }
-                                )
+                                FuncionariosScreen(aoVoltar = { navController.popBackStack() })
                             }
                             composable("perfil") {
-                                MeuPerfilScreen(
-                                    aoVoltar = { navController.popBackStack() }
-                                )
+                                MeuPerfilScreen(aoVoltar = { navController.popBackStack() })
+                            }
+                            composable("pedidos") {
+                                PedidosScreen(aoVoltar = { navController.popBackStack() })
+                            }
+                            composable("notificacoes") {
+                                NotificacoesScreen(aoVoltar = { navController.popBackStack() })
                             }
                         }
                     }
